@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Chris Eberle | Control</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      background-color: #000000;
+      color: #f5f5f7;
+    }
+    .apple-card {
+      background: #1c1c1e;
+      border: 1px solid #2c2c2e;
+    }
+    .apple-input {
+      background: #2c2c2e;
+      border: 1px solid #3a3a3c;
+      color: #ffffff;
+    }
+    .apple-input:focus {
+      outline: none;
+      border-color: #0a84ff;
+    }
+  </style>
+</head>
+<body class="antialiased selection:bg-blue-500 selection:text-white">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // CONFIGURACIÓN DE SUPABASE INTEGRADA
+    const SUPABASE_CONFIG = {
+      url: 'https://yhdvavytnstqsfolxhny.supabase.co',
+      key: 'EyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InloZHZhdnl0bnN0cXNmb2x4aG55Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzODc1MTYsImV4cCI6MjEwMzk2MzUxNn0.ZO3lLVFKghyvrCsDIuRQMGuwcqLc02GKR4yjOn4UDZY'
+    };
+    const supabase = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
+
+    const MESES = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+
+    function App() {
+      const [view, setView] = useState('inicio'); // inicio, registrar, historial, estadisticas
+      const [movimientos, setMovimientos] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [toast, setToast] = useState('');
+
+      const now = new Date();
+      const [currentYear, setCurrentYear] = useState(now.getFullYear());
+      const [currentMonth, setCurrentMonth] = useState(now.getMonth());
+
+      const fetchMovimientos = async () => {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('movimientos')
+          .select('*')
+          .order('fecha', { ascending: false })
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          setMovimientos(data);
+        }
+        setLoading(false);
+      };
+
+      useEffect(() => {
+        fetchMovimientos();
+      }, []);
+
+      const showToast = (msg) => {
+        setToast(msg);
+        setTimeout(() => setToast(''), 3000);
+      };
+
+      const movimientosMes = useMemo(() => {
+        return movimientos.filter(m => {
+          const f = new Date(m.fecha + 'T00:00:00');
+          return f.getFullYear() === currentYear && f.getMonth() === currentMonth;
+        });
+      }, [movimientos, currentYear, currentMonth]);
+
+      const totales = useMemo(() => {
+        return movimientosMes.reduce((acc, m) => {
+          const mon = m.moneda;
+          acc[mon].facturacion += Number(m.importe);
+          acc[mon].costos += Number(m.costo);
+          acc[mon].ganancia += Number(m.ganancia);
+          return acc;
+        }, {
+          ARS: { facturacion: 0, costos: 0, ganancia: 0 },
+          USD: { facturacion: 0, costos: 0, ganancia: 0 }
+        });
+      }, [movimientosMes]);
+
+      const navMonth = (delta) => {
+        let newM = currentMonth + delta;
+        let newY = currentYear;
+        if (newM < 0) {
+          newM = 11;
+          newY -= 1;
+        } else if (newM > 11) {
+          newM = 0;
+          newY += 1;
+        }
+        setCurrentMonth(newM);
+        setCurrentYear(newY);
+      };
+
+      return (
+        <div class="max-w-md mx-auto min-h-screen flex flex-col justify-between pb-20">
+          <header class="p-5 border-b border-zinc-800 flex justify-between items-center bg-black/80 backdrop-blur sticky top-0 z-40">
+            <div>
+              <h1 class="text-xs uppercase tracking-widest text-zinc-500 font-semibold">Control</h1>
+              <p class="text-lg font-bold tracking-tight text-white">Chris Eberle</p>
+            </div>
+            {toast && (
+              <div class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-3 py-1.5 rounded-full font-medium">
+                {toast}
+              </div>
+            )}
+          </header>
+
+          <main class="p-4 flex-1">
+            {view === 'inicio' && (
+              <InicioView 
+                currentYear={currentYear} 
+                currentMonth={currentMonth} 
+                navMonth={navMonth} 
+                totales={totales} 
+                movimientos={movimientosMes} 
+                onRegistrar={() => setView('registrar')}
+              />
+            )}
+            {view === 'registrar' && (
+              <RegistrarView 
+                onSaved={() => {
+                  fetchMovimientos();
+                  setView('inicio');
+                  showToast('Movimiento registrado ✓');
+                }}
+                onCancel={() => setView('inicio')}
+              />
+            )}
+            {view === 'historial' && (
+              <HistorialView movimientos={movimientos} />
+            )}
+            {view === 'estadisticas' && (
+              <EstadisticasView 
+                currentYear={currentYear} 
+                currentMonth={currentMonth} 
+                navMonth={navMonth} 
+                movimientosMes={movimientosMes}
+              />
+            )}
+          </main>
+
+          <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-zinc-900/90 backdrop-blur border-t border-zinc-800 flex justify-around py-2.5 z-40">
+            <button onClick={() => setView('inicio')} class={`flex flex-col items-center gap-1 ${view === 'inicio' ? 'text-blue-500' : 'text-zinc-500'}`}>
+              <span class="text-xs font-medium">Inicio</span>
+            </button>
+            <button onClick={() => setView('registrar')} class={`flex flex-col items-center gap-1 ${view === 'registrar' ? 'text-blue-500' : 'text-zinc-500'}`}>
+              <span class="text-xs font-medium">+ Registrar</span>
+            </button>
+            <button onClick={() => setView('historial')} class={`flex flex-col items-center gap-1 ${view === 'historial' ? 'text-blue-500' : 'text-zinc-500'}`}>
+              <span class="text-xs font-medium">Historial</span>
+            </button>
+            <button onClick={() => setView('estadisticas')} class={`flex flex-col items-center gap-1 ${view === 'estadisticas' ? 'text-blue-500' : 'text-zinc-500'}`}>
+              <span class="text-xs font-medium">Estadísticas</span>
+            </button>
+          </nav>
+        </div>
+      );
+    }
+
+    function InicioView({ currentYear, currentMonth, navMonth, totales, movimientos, onRegistrar }) {
+      const formatCurrency = (val, mon) => {
+        const symbol = mon === 'ARS' ? '$' : 'USD ';
+        return symbol + Number(val).toLocaleString('es-AR');
+      };
+
+      return (
+        <div class="space-y-5">
+          <div class="flex justify-between items-center bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
+            <button onClick={() => navMonth(-1)} class="px-3 py-1 text-zinc-400 font-bold">&lt;</button>
+            <span class="text-sm font-bold uppercase tracking-wider text-zinc-200">
+              {MESES[currentMonth]} {currentYear}
+            </span>
+            <button onClick={() => navMonth(1)} class="px-3 py-1 text-zinc-400 font-bold">&gt;</button>
+          </div>
+
+          <button 
+            onClick={onRegistrar}
+            class="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] transition-all text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-600/20 text-center text-base tracking-wide flex items-center justify-center gap-2"
+          >
+            <span>＋</span> REGISTRAR MOVIMIENTO
+          </button>
+
+          <div class="apple-card p-4 rounded-2xl space-y-3">
+            <h2 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Pesos Argentinos (ARS)</h2>
+            <div class="grid grid-cols-3 gap-2 pt-1">
+              <div>
+                <p class="text-[10px] text-zinc-500 font-medium">Facturación</p>
+                <p class="text-sm font-bold text-zinc-200">{formatCurrency(totales.ARS.facturacion, 'ARS')}</p>
+              </div>
+              <div>
+                <p class="text-[10px] text-zinc-500 font-medium">Costos</p>
+                <p class="text-sm font-bold text-zinc-400">{formatCurrency(totales.ARS.costos, 'ARS')}</p>
+              </div>
+              <div>
+                <p class="text-[10px] text-emerald-500 font-medium">Ganancia</p>
+                <p class="text-sm font-bold text-emerald-400">{formatCurrency(totales.ARS.ganancia, 'ARS')}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="apple-card p-4 rounded-2xl space-y-3">
+            <h2 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Dólares (USD)</h2>
+            <div class="grid grid-cols-3 gap-2 pt-1">
+              <div>
+                <p class="text-[10px] text-zinc-500 font-medium">Facturación</p>
+                <p class="text-sm font-bold text-zinc-200">{formatCurrency(totales.USD.facturacion, 'USD')}</p>
+              </div>
+              <div>
+                <p class="text-[10px] text-zinc-500 font-medium">Costos</p>
+                <p class="text-sm font-bold text-zinc-400">{formatCurrency(totales.USD.costos, 'USD')}</p>
+              </div>
+              <div>
+                <p class="text-[10px] text-emerald-500 font-medium">Ganancia</p>
+                <p class="text-sm font-bold text-emerald-400">{formatCurrency(totales.USD.ganancia, 'USD')}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3 pt-2">
+            <h3 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">Últimos Movimientos</h3>
+            {movimientos.length === 0 ? (
+              <p class="text-xs text-zinc-600 px-1 italic">Sin movimientos registrados en este mes.</p>
+            ) : (
+              <div class="space-y-2">
+                {movimientos.slice(0, 5).map((m) => (
+                  <div key={m.id} class="apple-card p-3 rounded-xl flex justify-between items-center">
+                    <div class="space-y-0.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-sm">{m.tipo === 'reparacion' ? '🔧' : '📱'}</span>
+                        <span class="text-sm font-semibold text-white">{m.cliente || (m.tipo === 'venta' ? 'Venta' : 'Cliente')}</span>
+                      </div>
+                      <p class="text-xs text-zinc-400">
+                        {m.producto_equipo} {m.trabajo ? `· ${m.trabajo}` : ''}
+                      </p>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-sm font-bold text-emerald-400">
+                        +{m.moneda === 'ARS' ? '$' : 'USD '}{Number(m.ganancia).toLocaleString('es-AR')}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function RegistrarView({ onSaved, onCancel }) {
+      const [tipo, setTipo] = useState('reparacion');
+      const [cliente, setCliente] = useState('');
+      const [productoEquipo, setProductoEquipo] = useState('');
+      const [trabajo, setTrabajo] = useState('');
+      const [costo, setCosto] = useState('');
+      const [importe, setImporte] = useState('');
+      const [moneda, setMoneda] = useState('ARS');
+      const [isSubmitting, setIsSubmitting] = useState(false);
+
+      const ganancia = useMemo(() => {
+        const c = parseFloat(costo) || 0;
+        const i = parseFloat(importe) || 0;
+        return i - c;
+      }, [costo, importe]);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!productoEquipo || costo === '' || importe === '') return;
+
+        setIsSubmitting(true);
+
+        const payload = {
+          tipo,
+          cliente: cliente.trim() || null,
+          producto_equipo: productoEquipo.trim(),
+          trabajo: tipo === 'reparacion' ? trabajo.trim() : null,
+          costo: Number(costo),
+          importe: Number(importe),
+          moneda,
+          fecha: new Date().toISOString().split('T')[0]
+        };
+
+        const { error } = await supabase.from('movimientos').insert([payload]);
+
+        setIsSubmitting(false);
+
+        if (!error) {
+          onSaved();
+        } else {
+          alert('Error al guardar movimiento');
+        }
+      };
+
+      return (
+        <div class="space-y-5">
+          <div class="flex justify-between items-center">
+            <h2 class="text-base font-bold text-white">Registrar Movimiento</h2>
+            <button onClick={onCancel} class="text-xs text-zinc-400 font-medium">Cancelar</button>
+          </div>
+
+          <div class="space-y-2">
+            <p class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">¿Qué tipo de movimiento?</p>
+            <div class="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setTipo('reparacion')}
+                class={`py-3.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border transition-all ${
+                  tipo === 'reparacion' 
+                    ? 'bg-blue-600/20 border-blue-500 text-blue-400' 
+                    : 'apple-card text-zinc-400 border-zinc-800'
+                }`}
+              >
+                <span>🔧</span> REPARACIÓN
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipo('venta')}
+                class={`py-3.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border transition-all ${
+                  tipo === 'venta' 
+                    ? 'bg-blue-600/20 border-blue-500 text-blue-400' 
+                    : 'apple-card text-zinc-400 border-zinc-800'
+                }`}
+              >
+                <span>📱</span> VENTA
+              </button>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} class="space-y-4">
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">
+                Cliente {tipo === 'venta' && <span class="text-zinc-600">(opcional)</span>}
+              </label>
+              <input 
+                type="text" 
+                placeholder={tipo === 'reparacion' ? 'Ej: Yanina' : 'Ej: Gustavo'}
+                value={cliente} 
+                onChange={e => setCliente(e.target.value)}
+                class="w-full apple-input rounded-xl px-3.5 py-3 text-sm"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Producto / Equipo</label>
+              <input 
+                type="text" 
+                required
+                placeholder={tipo === 'reparacion' ? 'Ej: iPhone XS Max' : 'Ej: iPhone 13 o Cable USB-C'}
+                value={productoEquipo} 
+                onChange={e => setProductoEquipo(e.target.value)}
+                class="w-full apple-input rounded-xl px-3.5 py-3 text-sm"
+              />
+            </div>
+
+            {tipo === 'reparacion' && (
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Trabajo realizado</label>
+                <input 
+                  type="text" 
+                  placeholder="Ej: Cambio de módulo"
+                  value={trabajo} 
+                  onChange={e => setTrabajo(e.target.value)}
+                  class="w-full apple-input rounded-xl px-3.5 py-3 text-sm"
+                />
+              </div>
+            )}
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">¿Cuánto gastaste?</label>
+                <input 
+                  type="number" 
+                  required
+                  step="any"
+                  placeholder="0"
+                  value={costo} 
+                  onChange={e => setCosto(e.target.value)}
+                  class="w-full apple-input rounded-xl px-3.5 py-3 text-sm"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">¿Cuánto recibiste?</label>
+                <input 
+                  type="number" 
+                  required
+                  step="any"
+                  placeholder="0"
+                  value={importe} 
+                  onChange={e => setImporte(e.target.value)}
+                  class="w-full apple-input rounded-xl px-3.5 py-3 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Moneda</label>
+              <div class="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMoneda('ARS')}
+                  class={`py-2.5 rounded-xl font-bold text-xs border transition-all ${
+                    moneda === 'ARS' ? 'bg-zinc-200 text-black border-white' : 'apple-card text-zinc-400 border-zinc-800'
+                  }`}
+                >
+                  ARS ($)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMoneda('USD')}
+                  class={`py-2.5 rounded-xl font-bold text-xs border transition-all ${
+                    moneda === 'USD' ? 'bg-zinc-200 text-black border-white' : 'apple-card text-zinc-400 border-zinc-800'
+                  }`}
+                >
+                  USD
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-zinc-900 border border-zinc-800 p-4 rounded-xl flex justify-between items-center">
+              <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Ganancia Estimada</span>
+              <span class="text-base font-bold text-emerald-400">
+                {moneda === 'ARS' ? '$' : 'USD '}{ganancia.toLocaleString('es-AR')}
+              </span>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={isSubmitting}
+              class="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] transition-all text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-600/20 text-center text-sm tracking-wide mt-2"
+            >
+              {isSubmitting ? 'GUARDANDO...' : 'GUARDAR MOVIMIENTO'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    function HistorialView({ movimientos }) {
+      const [filtroTipo, setFiltroTipo] = useState('Todos');
+      const [busqueda, setBusqueda] = useState('');
+
+      const movimientosFiltrados = useMemo(() => {
+        return movimientos.filter(m => {
+          const matchTipo = filtroTipo === 'Todos' || m.tipo === filtroTipo;
+          const query = busqueda.toLowerCase();
+          const matchSearch = !query || 
+            (m.cliente && m.cliente.toLowerCase().includes(query)) ||
+            (m.producto_equipo && m.producto_equipo.toLowerCase().includes(query)) ||
+            (m.trabajo && m.trabajo.toLowerCase().includes(query));
+          return matchTipo && matchSearch;
+        });
+      }, [movimientos, filtroTipo, busqueda]);
+
+      return (
+        <div class="space-y-4">
+          <h2 class="text-base font-bold text-white">Historial</h2>
+
+          <input 
+            type="text" 
+            placeholder="Buscar por cliente, equipo o producto..."
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            class="w-full apple-input rounded-xl px-3.5 py-2.5 text-sm"
+          />
+
+          <div class="flex gap-2">
+            {['Todos', 'reparacion', 'venta'].map(f => (
+              <button
+                key={f}
+                onClick={() => setFiltroTipo(f)}
+                class={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize border transition-all ${
+                  filtroTipo === f ? 'bg-zinc-200 text-black border-white' : 'apple-card text-zinc-400 border-zinc-800'
+                }`}
+              >
+                {f === 'reparacion' ? 'Reparaciones' : f === 'venta' ? 'Ventas' : 'Todos'}
+              </button>
+            ))}
+          </div>
+
+          <div class="space-y-2.5">
+            {movimientosFiltrados.length === 0 ? (
+              <p class="text-xs text-zinc-600 italic py-4">No se encontraron movimientos.</p>
+            ) : (
+              movimientosFiltrados.map(m => {
+                const dateObj = new Date(m.fecha + 'T00:00:00');
+                const fechaStr = `${dateObj.getDate()} ${MESES[dateObj.getMonth()].slice(0, 3).toUpperCase()}`;
+                const mon = m.moneda === 'ARS' ? '$' : 'USD ';
+
+                return (
+                  <div key={m.id} class="apple-card p-3.5 rounded-xl space-y-2">
+                    <div class="flex justify-between items-center text-xs">
+                      <span class="text-zinc-500 font-bold">{fechaStr}</span>
+                      <span class="font-semibold text-zinc-400 uppercase tracking-wider text-[10px]">
+                        {m.tipo === 'reparacion' ? '🔧 Reparación' : '📱 Venta'}
+                      </span>
+                    </div>
+
+                    <div>
+                      {m.cliente && <p class="text-sm font-bold text-white">{m.cliente}</p>}
+                      <p class="text-xs text-zinc-300 font-medium">{m.producto_equipo}</p>
+                      {m.trabajo && <p class="text-xs text-zinc-500">{m.trabajo}</p>}
+                    </div>
+
+                    <div class="pt-2 border-t border-zinc-800/80 flex justify-between items-end text-xs">
+                      <div class="text-zinc-500 space-y-0.5">
+                        <p>Costo: {mon}{Number(m.costo).toLocaleString('es-AR')}</p>
+                        <p>Recibido: {mon}{Number(m.importe).toLocaleString('es-AR')}</p>
+                      </div>
+                      <div class="text-right">
+                        <p class="text-[10px] text-emerald-500 font-medium">Ganancia</p>
+                        <p class="text-sm font-bold text-emerald-400">+{mon}{Number(m.ganancia).toLocaleString('es-AR')}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function EstadisticasView({ currentYear, currentMonth, navMonth, movimientosMes }) {
+      const stats = useMemo(() => {
+        const res = {
+          totalCount: movimientosMes.length,
+          ARS: { facturacion: 0, costos: 0, ganancia: 0 },
+          USD: { facturacion: 0, costos: 0, ganancia: 0 },
+          reparaciones: { count: 0, ARS: { facturacion: 0, ganancia: 0 }, USD: { facturacion: 0, ganancia: 0 } },
+          ventas: { count: 0, ARS: { facturacion: 0, ganancia: 0 }, USD: { facturacion: 0, ganancia: 0 } }
+        };
+
+        movimientosMes.forEach(m => {
+          const mon = m.moneda;
+          const fact = Number(m.importe);
+          const cost = Number(m.costo);
+          const gan = Number(m.ganancia);
+
+          res[mon].facturacion += fact;
+          res[mon].costos += cost;
+          res[mon].ganancia += gan;
+
+          if (m.tipo === 'reparacion') {
+            res.reparaciones.count += 1;
+            res.reparaciones[mon].facturacion += fact;
+            res.reparaciones[mon].ganancia += gan;
+          } else {
+            res.ventas.count += 1;
+            res.ventas[mon].facturacion += fact;
+            res.ventas[mon].ganancia += gan;
+          }
+        });
+
+        return res;
+      }, [movimientosMes]);
+
+      const format = (val, mon) => (mon === 'ARS' ? '$' : 'USD ') + Number(val).toLocaleString('es-AR');
+
+      return (
+        <div class="space-y-4">
+          <div class="flex justify-between items-center bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
+            <button onClick={() => navMonth(-1)} class="px-3 py-1 text-zinc-400 font-bold">&lt;</button>
+            <span class="text-sm font-bold uppercase tracking-wider text-zinc-200">
+              {MESES[currentMonth]} {currentYear}
+            </span>
+            <button onClick={() => navMonth(1)} class="px-3 py-1 text-zinc-400 font-bold">&gt;</button>
+          </div>
+
+          <div class="apple-card p-4 rounded-2xl flex justify-between items-center">
+            <span class="text-xs font-medium text-zinc-400">Cantidad de movimientos</span>
+            <span class="text-lg font-bold text-white">{stats.totalCount}</span>
+          </div>
+
+          <div class="apple-card p-4 rounded-2xl space-y-3">
+            <h3 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Totales Generales</h3>
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between border-b border-zinc-800/60 pb-1.5">
+                <span class="text-zinc-400">Ganancia ARS</span>
+                <span class="font-bold text-emerald-400">{format(stats.ARS.ganancia, 'ARS')}</span>
+              </div>
+              <div class="flex justify-between border-b border-zinc-800/60 pb-1.5">
+                <span class="text-zinc-400">Ganancia USD</span>
+                <span class="font-bold text-emerald-400">{format(stats.USD.ganancia, 'USD')}</span>
+              </div>
+              <div class="flex justify-between border-b border-zinc-800/60 pb-1.5">
+                <span class="text-zinc-500">Facturación ARS / USD</span>
+                <span class="font-semibold text-zinc-300">{format(stats.ARS.facturacion, 'ARS')} | {format(stats.USD.facturacion, 'USD')}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-zinc-500">Costos ARS / USD</span>
+                <span class="font-semibold text-zinc-400">{format(stats.ARS.costos, 'ARS')} | {format(stats.USD.costos, 'USD')}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="apple-card p-4 rounded-2xl space-y-2">
+            <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+              <h3 class="text-xs font-semibold text-zinc-300 uppercase tracking-wider">🔧 Reparaciones</h3>
+              <span class="text-xs font-bold bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-full">{stats.reparaciones.count}</span>
+            </div>
+            <div class="space-y-1.5 text-xs pt-1">
+              <div class="flex justify-between">
+                <span class="text-zinc-500">Facturación</span>
+                <span class="text-zinc-300">{format(stats.reparaciones.ARS.facturacion, 'ARS')} | {format(stats.reparaciones.USD.facturacion, 'USD')}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-zinc-500">Ganancia</span>
+                <span class="font-bold text-emerald-400">{format(stats.reparaciones.ARS.ganancia, 'ARS')} | {format(stats.reparaciones.USD.ganancia, 'USD')}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="apple-card p-4 rounded-2xl space-y-2">
+            <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+              <h3 class="text-xs font-semibold text-zinc-300 uppercase tracking-wider">📱 Ventas</h3>
+              <span class="text-xs font-bold bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-full">{stats.ventas.count}</span>
+            </div>
+            <div class="space-y-1.5 text-xs pt-1">
+              <div class="flex justify-between">
+                <span class="text-zinc-500">Facturación</span>
+                <span class="text-zinc-300">{format(stats.ventas.ARS.facturacion, 'ARS')} | {format(stats.ventas.USD.facturacion, 'USD')}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-zinc-500">Ganancia</span>
+                <span class="font-bold text-emerald-400">{format(stats.ventas.ARS.ganancia, 'ARS')} | {format(stats.ventas.USD.ganancia, 'USD')}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
