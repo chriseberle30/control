@@ -58,6 +58,7 @@
     function App() {
       const [view, setView] = useState('inicio');
       const [movimientos, setMovimientos] = useState([]);
+      const [gastos, setGastos] = useState([]);
       const [loading, setLoading] = useState(true);
       const [toast, setToast] = useState('');
 
@@ -65,18 +66,24 @@
       const [currentYear, setCurrentYear] = useState(now.getFullYear());
       const [currentMonth, setCurrentMonth] = useState(now.getMonth());
 
-      const fetchMovimientos = async () => {
+      const fetchData = async () => {
         setLoading(true);
         try {
-          const { data, error } = await supabaseClient
+          const { data: movsData } = await supabaseClient
             .from('movimientos')
             .select('*')
             .order('fecha', { ascending: false })
             .order('created_at', { ascending: false });
 
-          if (!error && data) {
-            setMovimientos(data);
-          }
+          if (movsData) setMovimientos(movsData);
+
+          const { data: gastosData } = await supabaseClient
+            .from('gastos_personales')
+            .select('*')
+            .order('fecha', { ascending: false })
+            .order('created_at', { ascending: false });
+
+          if (gastosData) setGastos(gastosData);
         } catch (err) {
           console.error(err);
         }
@@ -84,7 +91,7 @@
       };
 
       useEffect(() => {
-        fetchMovimientos();
+        fetchData();
       }, []);
 
       const showToast = (msg) => {
@@ -99,19 +106,33 @@
         });
       }, [movimientos, currentYear, currentMonth]);
 
-      const totales = useMemo(() => {
-        return movimientosMes.reduce((acc, m) => {
-          const mon = m.moneda || 'ARS';
-          if (!acc[mon]) acc[mon] = { facturacion: 0, costos: 0, ganancia: 0 };
-          acc[mon].facturacion += Number(m.importe || 0);
-          acc[mon].costos += Number(m.costo || 0);
-          acc[mon].ganancia += Number(m.ganancia || 0);
-          return acc;
-        }, {
-          ARS: { facturacion: 0, costos: 0, ganancia: 0 },
-          USD: { facturacion: 0, costos: 0, ganancia: 0 }
+      const gastosMes = useMemo(() => {
+        return gastos.filter(g => {
+          const f = new Date(g.fecha + 'T00:00:00');
+          return f.getFullYear() === currentYear && f.getMonth() === currentMonth;
         });
-      }, [movimientosMes]);
+      }, [gastos, currentYear, currentMonth]);
+
+      const totales = useMemo(() => {
+        const res = {
+          ARS: { facturacion: 0, costos: 0, ganancia: 0, gastos: 0 },
+          USD: { facturacion: 0, costos: 0, ganancia: 0, gastos: 0 }
+        };
+
+        movimientosMes.forEach(m => {
+          const mon = m.moneda || 'ARS';
+          res[mon].facturacion += Number(m.importe || 0);
+          res[mon].costos += Number(m.costo || 0);
+          res[mon].ganancia += Number(m.ganancia || 0);
+        });
+
+        gastosMes.forEach(g => {
+          const mon = g.moneda || 'ARS';
+          res[mon].gastos += Number(g.monto || 0);
+        });
+
+        return res;
+      }, [movimientosMes, gastosMes]);
 
       const navMonth = (delta) => {
         let newM = currentMonth + delta;
@@ -131,7 +152,7 @@
         <div class="max-w-md mx-auto min-h-screen flex flex-col justify-between pb-24 bg-[#f2f2f7]">
           <header class="p-4 px-5 border-b border-gray-200 flex justify-between items-center bg-white/80 backdrop-blur sticky top-0 z-40">
             <div>
-              <h1 class="text-[10px] uppercase tracking-widest text-gray-400 font-bold">Control de Caja</h1>
+              <h1 class="text-[10px] uppercase tracking-widest text-gray-400 font-bold">Control Personal & Taller</h1>
               <p class="text-lg font-black tracking-tight text-gray-900">Chris Eberle</p>
             </div>
             {toast ? (
@@ -153,29 +174,33 @@
                 navMonth={navMonth} 
                 totales={totales} 
                 movimientos={movimientosMes} 
-                onRegistrar={() => setView('registrar')}
+                gastos={gastosMes}
+                onRegistrarMov={() => setView('registrar')}
+                onRegistrarGasto={() => setView('gasto')}
               />
             )}
             {view === 'registrar' && (
               <RegistrarView 
                 onSaved={() => {
-                  fetchMovimientos();
+                  fetchData();
                   setView('inicio');
                   showToast('Movimiento guardado ✓');
                 }}
                 onCancel={() => setView('inicio')}
               />
             )}
-            {view === 'historial' && (
-              <HistorialView movimientos={movimientos} />
-            )}
-            {view === 'estadisticas' && (
-              <EstadisticasView 
-                currentYear={currentYear} 
-                currentMonth={currentMonth} 
-                navMonth={navMonth} 
-                movimientosMes={movimientosMes}
+            {view === 'gasto' && (
+              <RegistrarGastoView 
+                onSaved={() => {
+                  fetchData();
+                  setView('inicio');
+                  showToast('Gasto registrado ✓');
+                }}
+                onCancel={() => setView('inicio')}
               />
+            )}
+            {view === 'historial' && (
+              <HistorialView movimientos={movimientos} gastos={gastos} />
             )}
           </main>
 
@@ -185,27 +210,24 @@
               <span class="text-[11px]">Inicio</span>
             </button>
             <button onClick={() => setView('registrar')} class={`flex flex-col items-center gap-1 ${view === 'registrar' ? 'text-blue-600 font-bold' : 'text-gray-400'}`}>
-              <span class="text-lg">➕</span>
-              <span class="text-[11px]">Registrar</span>
+              <span class="text-lg">🔧</span>
+              <span class="text-[11px]">Taller</span>
+            </button>
+            <button onClick={() => setView('gasto')} class={`flex flex-col items-center gap-1 ${view === 'gasto' ? 'text-blue-600 font-bold' : 'text-gray-400'}`}>
+              <span class="text-lg">💸</span>
+              <span class="text-[11px]">Gasto</span>
             </button>
             <button onClick={() => setView('historial')} class={`flex flex-col items-center gap-1 ${view === 'historial' ? 'text-blue-600 font-bold' : 'text-gray-400'}`}>
               <span class="text-lg">📋</span>
               <span class="text-[11px]">Historial</span>
-            </button>
-            <button onClick={() => setView('estadisticas')} class={`flex flex-col items-center gap-1 ${view === 'estadisticas' ? 'text-blue-600 font-bold' : 'text-gray-400'}`}>
-              <span class="text-lg">📊</span>
-              <span class="text-[11px]">Estadísticas</span>
             </button>
           </nav>
         </div>
       );
     }
 
-    function InicioView({ currentYear, currentMonth, navMonth, totales, movimientos, onRegistrar }) {
-      const formatCurrency = (val, mon) => {
-        const symbol = mon === 'ARS' ? '$' : 'USD ';
-        return symbol + Number(val).toLocaleString('es-AR');
-      };
+    function InicioView({ currentYear, currentMonth, navMonth, totales, movimientos, gastos, onRegistrarMov, onRegistrarGasto }) {
+      const formatCurrency = (val, mon) => (mon === 'ARS' ? '$' : 'USD ') + Number(val).toLocaleString('es-AR');
 
       return (
         <div class="space-y-4">
@@ -217,84 +239,189 @@
             <button onClick={() => navMonth(1)} class="w-8 h-8 flex items-center justify-center text-gray-500 font-black rounded-xl hover:bg-gray-100">&gt;</button>
           </div>
 
-          <button 
-            onClick={onRegistrar}
-            class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all text-white font-bold py-3.5 rounded-2xl shadow-md shadow-blue-500/10 text-center text-sm tracking-wide flex items-center justify-center gap-2"
-          >
-            <span class="text-base">＋</span> REGISTRAR MOVIMIENTO
-          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button 
+              onClick={onRegistrarMov}
+              class="bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all text-white font-bold py-3 rounded-2xl shadow-md text-center text-xs tracking-wide flex items-center justify-center gap-1.5"
+            >
+              <span>🔧</span> NUEVO TRABAJO
+            </button>
+            <button 
+              onClick={onRegistrarGasto}
+              class="bg-rose-600 hover:bg-rose-700 active:scale-[0.98] transition-all text-white font-bold py-3 rounded-2xl shadow-md text-center text-xs tracking-wide flex items-center justify-center gap-1.5"
+            >
+              <span>🛒</span> GASTO PERSONAL
+            </button>
+          </div>
 
+          {/* Resumen ARS */}
           <div class="apple-card p-4 rounded-2xl space-y-3">
             <div class="flex justify-between items-center border-b border-gray-100 pb-2">
-              <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Pesos Argentinos (ARS)</h2>
+              <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Caja Pesos (ARS)</h2>
               <span class="text-[10px] bg-blue-50 text-blue-600 font-bold px-2 py-0.5 rounded-full">ARS</span>
             </div>
             <div class="grid grid-cols-3 gap-2 pt-0.5 text-center">
               <div>
-                <p class="text-[10px] text-gray-400 font-semibold uppercase">Ingresos</p>
-                <p class="text-sm font-bold text-gray-800">{formatCurrency(totales.ARS.facturacion, 'ARS')}</p>
+                <p class="text-[10px] text-gray-400 font-semibold uppercase">Taller Ganancia</p>
+                <p class="text-xs font-bold text-emerald-600">{formatCurrency(totales.ARS.ganancia, 'ARS')}</p>
               </div>
               <div>
-                <p class="text-[10px] text-gray-400 font-semibold uppercase">Costos</p>
-                <p class="text-sm font-bold text-gray-500">{formatCurrency(totales.ARS.costos, 'ARS')}</p>
+                <p class="text-[10px] text-gray-400 font-semibold uppercase">Gastos Pers.</p>
+                <p class="text-xs font-bold text-rose-500">-{formatCurrency(totales.ARS.gastos, 'ARS')}</p>
               </div>
               <div>
-                <p class="text-[10px] text-emerald-600 font-semibold uppercase">Ganancia</p>
-                <p class="text-sm font-black text-emerald-600">{formatCurrency(totales.ARS.ganancia, 'ARS')}</p>
+                <p class="text-[10px] text-gray-700 font-semibold uppercase">Remanente</p>
+                <p class={`text-xs font-black ${totales.ARS.ganancia - totales.ARS.gastos >= 0 ? 'text-gray-900' : 'text-rose-600'}`}>
+                  {formatCurrency(totales.ARS.ganancia - totales.ARS.gastos, 'ARS')}
+                </p>
               </div>
             </div>
           </div>
 
-          <div class="apple-card p-4 rounded-2xl space-y-3">
-            <div class="flex justify-between items-center border-b border-gray-100 pb-2">
-              <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Dólares (USD)</h2>
-              <span class="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full">USD</span>
-            </div>
-            <div class="grid grid-cols-3 gap-2 pt-0.5 text-center">
-              <div>
-                <p class="text-[10px] text-gray-400 font-semibold uppercase">Ingresos</p>
-                <p class="text-sm font-bold text-gray-800">{formatCurrency(totales.USD.facturacion, 'USD')}</p>
-              </div>
-              <div>
-                <p class="text-[10px] text-gray-400 font-semibold uppercase">Costos</p>
-                <p class="text-sm font-bold text-gray-500">{formatCurrency(totales.USD.costos, 'USD')}</p>
-              </div>
-              <div>
-                <p class="text-[10px] text-emerald-600 font-semibold uppercase">Ganancia</p>
-                <p class="text-sm font-black text-emerald-600">{formatCurrency(totales.USD.ganancia, 'USD')}</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="space-y-2.5 pt-1">
-            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider px-1">Últimos Movimientos del Mes</h3>
-            {movimientos.length === 0 ? (
-              <div class="apple-card p-6 rounded-2xl text-center">
-                <p class="text-xs text-gray-400">Sin registros para este mes.</p>
+          {/* Últimos Gastos Personales */}
+          <div class="space-y-2 pt-1">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider px-1">Últimos Gastos Personales</h3>
+            {gastos.length === 0 ? (
+              <div class="apple-card p-4 rounded-2xl text-center">
+                <p class="text-xs text-gray-400">Sin gastos cargados este mes.</p>
               </div>
             ) : (
               <div class="space-y-2">
-                {movimientos.slice(0, 5).map((m) => (
-                  <div key={m.id} class="apple-card p-3 rounded-xl flex justify-between items-center">
-                    <div class="space-y-0.5">
-                      <div class="flex items-center gap-1.5">
-                        <span class="text-xs">{m.tipo === 'reparacion' ? '🔧' : '📱'}</span>
-                        <span class="text-xs font-bold text-gray-900">{m.cliente || (m.tipo === 'venta' ? 'Venta Directa' : 'Cliente')}</span>
-                      </div>
-                      <p class="text-[11px] text-gray-500 font-medium">
-                        {m.producto_equipo} {m.trabajo ? `· ${m.trabajo}` : ''}
-                      </p>
+                {gastos.slice(0, 4).map((g) => (
+                  <div key={g.id} class="apple-card p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                      <p class="text-xs font-bold text-gray-900">{g.concepto}</p>
+                      <span class="text-[10px] bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">{g.categoria}</span>
                     </div>
-                    <div class="text-right">
-                      <p class="text-xs font-black text-emerald-600">
-                        +{m.moneda === 'ARS' ? '$' : 'USD '}{Number(m.ganancia).toLocaleString('es-AR')}
-                      </p>
-                    </div>
+                    <p class="text-xs font-black text-rose-500">
+                      -{g.moneda === 'ARS' ? '$' : 'USD '}{Number(g.monto).toLocaleString('es-AR')}
+                    </p>
                   </div>
                 ))}
               </div>
             )}
           </div>
+        </div>
+      );
+    }
+
+    function RegistrarGastoView({ onSaved, onCancel }) {
+      const [concepto, setConcepto] = useState('');
+      const [categoria, setCategoria] = useState('Supermercado / Comida');
+      const [monto, setMonto] = useState('');
+      const [moneda, setMoneda] = useState('ARS');
+      const [isSubmitting, setIsSubmitting] = useState(false);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!concepto || !monto) return;
+
+        setIsSubmitting(true);
+
+        const payload = {
+          concepto: concepto.trim(),
+          categoria,
+          monto: Number(monto),
+          moneda,
+          fecha: new Date().toISOString().split('T')[0]
+        };
+
+        try {
+          const { error } = await supabaseClient.from('gastos_personales').insert([payload]);
+
+          setIsSubmitting(false);
+
+          if (!error) {
+            onSaved();
+          } else {
+            alert('Error al guardar: ' + error.message);
+          }
+        } catch (err) {
+          setIsSubmitting(false);
+          alert('Error de conexión.');
+        }
+      };
+
+      return (
+        <div class="space-y-4">
+          <div class="flex justify-between items-center">
+            <h2 class="text-sm font-bold text-rose-600 uppercase tracking-wider">Nuevo Gasto Personal</h2>
+            <button onClick={onCancel} class="text-xs text-gray-400 font-semibold">Cancelar</button>
+          </div>
+
+          <form onSubmit={handleSubmit} class="space-y-3.5">
+            <div>
+              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">¿En qué gastaste?</label>
+              <input 
+                type="text" 
+                required
+                placeholder="Ej: Supermercado, Kiosco, Nafta, Salida"
+                value={concepto} 
+                onChange={e => setConcepto(e.target.value)}
+                class="w-full apple-input rounded-xl px-3.5 py-2.5 text-xs font-medium"
+              />
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Categoría</label>
+              <select 
+                value={categoria} 
+                onChange={e => setCategoria(e.target.value)}
+                class="w-full apple-input rounded-xl px-3 py-2.5 text-xs font-medium"
+              >
+                <option value="Supermercado / Comida">🛒 Supermercado / Comida</option>
+                <option value="Transporte / Auto">🚗 Transporte / Auto</option>
+                <option value="Servicios / Cuentas">📄 Servicios / Cuentas</option>
+                <option value="Salidas / Ocio">☕ Salidas / Ocio</option>
+                <option value="Varios">📦 Varios</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Monto ($)</label>
+              <input 
+                type="number" 
+                required
+                step="any"
+                placeholder="0"
+                value={monto} 
+                onChange={e => setMonto(e.target.value)}
+                class="w-full apple-input rounded-xl px-3.5 py-2.5 text-xs font-medium"
+              />
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Moneda</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMoneda('ARS')}
+                  class={`py-2 rounded-xl font-bold text-xs border transition-all ${
+                    moneda === 'ARS' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'
+                  }`}
+                >
+                  ARS ($)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMoneda('USD')}
+                  class={`py-2 rounded-xl font-bold text-xs border transition-all ${
+                    moneda === 'USD' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'
+                  }`}
+                >
+                  USD
+                </button>
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={isSubmitting}
+              class="w-full bg-rose-600 hover:bg-rose-700 active:scale-[0.98] transition-all text-white font-bold py-3.5 rounded-xl shadow-md text-center text-xs tracking-wide mt-2"
+            >
+              {isSubmitting ? 'GUARDANDO...' : 'REGISTRAR GASTO'}
+            </button>
+          </form>
         </div>
       );
     }
@@ -340,7 +467,7 @@
           if (!error) {
             onSaved();
           } else {
-            alert('Error al guardar: ' + (error.message || 'Error de permisos'));
+            alert('Error al guardar: ' + error.message);
           }
         } catch (err) {
           setIsSubmitting(false);
@@ -351,7 +478,7 @@
       return (
         <div class="space-y-4">
           <div class="flex justify-between items-center">
-            <h2 class="text-sm font-bold text-gray-900 uppercase tracking-wider">Nuevo Registro</h2>
+            <h2 class="text-sm font-bold text-gray-900 uppercase tracking-wider">Nuevo Trabajo / Venta</h2>
             <button onClick={onCancel} class="text-xs text-gray-400 font-semibold">Cancelar</button>
           </div>
 
@@ -360,9 +487,7 @@
               type="button"
               onClick={() => setTipo('reparacion')}
               class={`py-3 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
-                tipo === 'reparacion' 
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                  : 'bg-white text-gray-600 border-gray-200'
+                tipo === 'reparacion' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200'
               }`}
             >
               <span>🔧</span> REPARACIÓN
@@ -371,9 +496,7 @@
               type="button"
               onClick={() => setTipo('venta')}
               class={`py-3 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
-                tipo === 'venta' 
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                  : 'bg-white text-gray-600 border-gray-200'
+                tipo === 'venta' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200'
               }`}
             >
               <span>📱</span> VENTA
@@ -387,7 +510,7 @@
               </label>
               <input 
                 type="text" 
-                placeholder={tipo === 'reparacion' ? 'Ej: Yanina' : 'Ej: Gustavo'}
+                placeholder="Ej: Cliente / Nombre"
                 value={cliente} 
                 onChange={e => setCliente(e.target.value)}
                 class="w-full apple-input rounded-xl px-3.5 py-2.5 text-xs font-medium"
@@ -399,7 +522,7 @@
               <input 
                 type="text" 
                 required
-                placeholder={tipo === 'reparacion' ? 'Ej: iPhone XS Max' : 'Ej: Cable USB-C o iPhone 13'}
+                placeholder="Ej: iPhone XS Max"
                 value={productoEquipo} 
                 onChange={e => setProductoEquipo(e.target.value)}
                 class="w-full apple-input rounded-xl px-3.5 py-2.5 text-xs font-medium"
@@ -480,7 +603,7 @@
             <button 
               type="submit"
               disabled={isSubmitting}
-              class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all text-white font-bold py-3.5 rounded-xl shadow-md shadow-blue-500/10 text-center text-xs tracking-wide mt-2"
+              class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all text-white font-bold py-3.5 rounded-xl shadow-md text-center text-xs tracking-wide mt-2"
             >
               {isSubmitting ? 'GUARDANDO...' : 'GUARDAR MOVIMIENTO'}
             </button>
@@ -489,182 +612,58 @@
       );
     }
 
-    function HistorialView({ movimientos }) {
-      const [filtroTipo, setFiltroTipo] = useState('Todos');
-      const [busqueda, setBusqueda] = useState('');
-
-      const movimientosFiltrados = useMemo(() => {
-        return movimientos.filter(m => {
-          const matchTipo = filtroTipo === 'Todos' || m.tipo === filtroTipo;
-          const query = busqueda.toLowerCase();
-          const matchSearch = !query || 
-            (m.cliente && m.cliente.toLowerCase().includes(query)) ||
-            (m.producto_equipo && m.producto_equipo.toLowerCase().includes(query)) ||
-            (m.trabajo && m.trabajo.toLowerCase().includes(query));
-          return matchTipo && matchSearch;
-        });
-      }, [movimientos, filtroTipo, busqueda]);
+    function HistorialView({ movimientos, gastos }) {
+      const [tab, setTab] = useState('gastos');
 
       return (
         <div class="space-y-3">
-          <h2 class="text-sm font-bold text-gray-900 uppercase tracking-wider">Historial General</h2>
-
-          <input 
-            type="text" 
-            placeholder="Buscar por cliente, equipo o trabajo..."
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            class="w-full apple-input rounded-xl px-3.5 py-2 text-xs font-medium"
-          />
-
-          <div class="flex gap-2">
-            {['Todos', 'reparacion', 'venta'].map(f => (
-              <button
-                key={f}
-                onClick={() => setFiltroTipo(f)}
-                class={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
-                  filtroTipo === f ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'
-                }`}
-              >
-                {f === 'reparacion' ? 'Reparaciones' : f === 'venta' ? 'Ventas' : 'Todos'}
-              </button>
-            ))}
+          <div class="grid grid-cols-2 gap-2 bg-gray-200 p-1 rounded-xl">
+            <button 
+              onClick={() => setTab('gastos')}
+              class={`py-2 rounded-lg text-xs font-bold transition-all ${tab === 'gastos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            >
+              🛒 Gastos Personales
+            </button>
+            <button 
+              onClick={() => setTab('taller')}
+              class={`py-2 rounded-lg text-xs font-bold transition-all ${tab === 'taller' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            >
+              🔧 Trabajos Taller
+            </button>
           </div>
 
-          <div class="space-y-2 pt-1">
-            {movimientosFiltrados.length === 0 ? (
-              <p class="text-xs text-gray-400 italic py-4 text-center">No hay datos que coincidan.</p>
-            ) : (
-              movimientosFiltrados.map(m => {
-                const dateObj = new Date(m.fecha + 'T00:00:00');
-                const fechaStr = `${dateObj.getDate()} ${MESES[dateObj.getMonth()].slice(0, 3).toUpperCase()}`;
-                const mon = m.moneda === 'ARS' ? '$' : 'USD ';
-
-                return (
-                  <div key={m.id} class="apple-card p-3 rounded-xl space-y-1.5">
-                    <div class="flex justify-between items-center text-[10px]">
-                      <span class="text-gray-400 font-bold">{fechaStr}</span>
-                      <span class="font-bold text-gray-500 uppercase tracking-wider">
-                        {m.tipo === 'reparacion' ? '🔧 Reparación' : '📱 Venta'}
-                      </span>
-                    </div>
-
+          {tab === 'gastos' ? (
+            <div class="space-y-2">
+              {gastos.length === 0 ? (
+                <p class="text-xs text-gray-400 italic py-4 text-center">No hay gastos registrados.</p>
+              ) : (
+                gastos.map(g => (
+                  <div key={g.id} class="apple-card p-3 rounded-xl flex justify-between items-center">
                     <div>
-                      {m.cliente && <p class="text-xs font-bold text-gray-900">{m.cliente}</p>}
-                      <p class="text-xs text-gray-700 font-medium">{m.producto_equipo}</p>
-                      {m.trabajo && <p class="text-[11px] text-gray-400">{m.trabajo}</p>}
+                      <p class="text-xs font-bold text-gray-900">{g.concepto}</p>
+                      <p class="text-[10px] text-gray-400 font-semibold">{g.fecha} · {g.categoria}</p>
                     </div>
-
-                    <div class="pt-1.5 border-t border-gray-100 flex justify-between items-end text-xs">
-                      <div class="text-gray-400 space-y-0.5 text-[10px]">
-                        <p>Costo: {mon}{Number(m.costo).toLocaleString('es-AR')}</p>
-                        <p>Cobrado: {mon}{Number(m.importe).toLocaleString('es-AR')}</p>
-                      </div>
-                      <div class="text-right">
-                        <p class="text-[9px] text-emerald-600 font-bold uppercase">Ganancia</p>
-                        <p class="text-xs font-black text-emerald-600">+{mon}{Number(m.ganancia).toLocaleString('es-AR')}</p>
-                      </div>
-                    </div>
+                    <p class="text-xs font-black text-rose-500">
+                      -{g.moneda === 'ARS' ? '$' : 'USD '}{Number(g.monto).toLocaleString('es-AR')}
+                    </p>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      );
-    }
-
-    function EstadisticasView({ currentYear, currentMonth, navMonth, movimientosMes }) {
-      const stats = useMemo(() => {
-        const res = {
-          totalCount: movimientosMes.length,
-          ARS: { facturacion: 0, costos: 0, ganancia: 0 },
-          USD: { facturacion: 0, costos: 0, ganancia: 0 },
-          reparaciones: { count: 0, ARS: { facturacion: 0, ganancia: 0 }, USD: { facturacion: 0, ganancia: 0 } },
-          ventas: { count: 0, ARS: { facturacion: 0, ganancia: 0 }, USD: { facturacion: 0, ganancia: 0 } }
-        };
-
-        movimientosMes.forEach(m => {
-          const mon = m.moneda || 'ARS';
-          const fact = Number(m.importe || 0);
-          const cost = Number(m.costo || 0);
-          const gan = Number(m.ganancia || 0);
-
-          if (!res[mon]) res[mon] = { facturacion: 0, costos: 0, ganancia: 0 };
-          res[mon].facturacion += fact;
-          res[mon].costos += cost;
-          res[mon].ganancia += gan;
-
-          if (m.tipo === 'reparacion') {
-            res.reparaciones.count += 1;
-            res.reparaciones[mon].facturacion += fact;
-            res.reparaciones[mon].ganancia += gan;
-          } else {
-            res.ventas.count += 1;
-            res.ventas[mon].facturacion += fact;
-            res.ventas[mon].ganancia += gan;
-          }
-        });
-
-        return res;
-      }, [movimientosMes]);
-
-      const format = (val, mon) => (mon === 'ARS' ? '$' : 'USD ') + Number(val).toLocaleString('es-AR');
-
-      return (
-        <div class="space-y-3">
-          <div class="flex justify-between items-center bg-white p-2.5 rounded-2xl border border-gray-200 shadow-sm">
-            <button onClick={() => navMonth(-1)} class="w-8 h-8 flex items-center justify-center text-gray-500 font-black rounded-xl hover:bg-gray-100">&lt;</button>
-            <span class="text-xs font-bold uppercase tracking-wider text-gray-700">
-              {MESES[currentMonth]} {currentYear}
-            </span>
-            <button onClick={() => navMonth(1)} class="w-8 h-8 flex items-center justify-center text-gray-500 font-black rounded-xl hover:bg-gray-100">&gt;</button>
-          </div>
-
-          <div class="apple-card p-3.5 rounded-2xl flex justify-between items-center">
-            <span class="text-xs font-bold text-gray-500 uppercase">Cantidad de Trabajos</span>
-            <span class="text-base font-black text-blue-600">{stats.totalCount}</span>
-          </div>
-
-          <div class="apple-card p-4 rounded-2xl space-y-2.5">
-            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 pb-1.5">Resumen del Mes</h3>
-            <div class="space-y-1.5 text-xs">
-              <div class="flex justify-between border-b border-gray-50 pb-1">
-                <span class="text-gray-500">Ganancia Total ARS</span>
-                <span class="font-bold text-emerald-600">{format(stats.ARS.ganancia, 'ARS')}</span>
-              </div>
-              <div class="flex justify-between border-b border-gray-50 pb-1">
-                <span class="text-gray-500">Ganancia Total USD</span>
-                <span class="font-bold text-emerald-600">{format(stats.USD.ganancia, 'USD')}</span>
-              </div>
+                ))
+              )}
             </div>
-          </div>
-
-          <div class="apple-card p-3.5 rounded-2xl space-y-2">
-            <div class="flex justify-between items-center border-b border-gray-100 pb-1.5">
-              <h3 class="text-xs font-bold text-gray-700 uppercase">🔧 Reparaciones</h3>
-              <span class="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{stats.reparaciones.count}</span>
+          ) : (
+            <div class="space-y-2">
+              {movimientos.map(m => (
+                <div key={m.id} class="apple-card p-3 rounded-xl space-y-1">
+                  <div class="flex justify-between items-center text-[10px]">
+                    <span class="text-gray-400 font-bold">{m.fecha}</span>
+                    <span class="font-bold text-gray-500 uppercase">{m.tipo}</span>
+                  </div>
+                  <p class="text-xs font-bold text-gray-900">{m.producto_equipo} {m.cliente ? `(${m.cliente})` : ''}</p>
+                  <p class="text-xs font-black text-emerald-600 text-right">+{m.moneda === 'ARS' ? '$' : 'USD '}{Number(m.ganancia).toLocaleString('es-AR')}</p>
+                </div>
+              ))}
             </div>
-            <div class="space-y-1 text-xs">
-              <div class="flex justify-between">
-                <span class="text-gray-400">Ganancia ARS / USD</span>
-                <span class="font-bold text-emerald-600">{format(stats.reparaciones.ARS.ganancia, 'ARS')} | {format(stats.reparaciones.USD.ganancia, 'USD')}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="apple-card p-3.5 rounded-2xl space-y-2">
-            <div class="flex justify-between items-center border-b border-gray-100 pb-1.5">
-              <h3 class="text-xs font-bold text-gray-700 uppercase">📱 Ventas</h3>
-              <span class="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{stats.ventas.count}</span>
-            </div>
-            <div class="space-y-1 text-xs">
-              <div class="flex justify-between">
-                <span class="text-gray-400">Ganancia ARS / USD</span>
-                <span class="font-bold text-emerald-600">{format(stats.ventas.ARS.ganancia, 'ARS')} | {format(stats.ventas.USD.ganancia, 'USD')}</span>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       );
     }
